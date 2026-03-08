@@ -293,6 +293,56 @@
             font-size: 0.9em;
             margin-top: 10px;
         }
+
+        .btn-test {
+            background: #17a2b8;
+            margin-left: 10px;
+        }
+
+        .btn-test:hover {
+            background: #138496;
+            box-shadow: 0 5px 15px rgba(23, 162, 184, 0.4);
+        }
+
+        .api-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .api-status.show {
+            display: block;
+        }
+
+        .api-status.success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .api-status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .selection-info {
+            margin-top: 15px;
+            padding: 12px;
+            background: #e7f3ff;
+            border-left: 4px solid #667eea;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .selection-info.show {
+            display: block;
+        }
+
+        .selection-info strong {
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -310,6 +360,8 @@
                 <label for="apiKey">Claude API Key</label>
                 <input type="text" id="apiKey" placeholder="sk-ant-api03-..." />
             </div>
+            <button class="btn btn-test" id="testApiKeyBtn">🔍 API Key 테스트</button>
+            <div id="apiStatus" class="api-status"></div>
         </div>
 
         <!-- Section 2: File Upload -->
@@ -344,7 +396,10 @@
                 <span class="section-number">4</span>
                 예문 생성
             </div>
-            <button class="btn" id="generateBtn" disabled>✨ 예문 생성하기</button>
+            <div class="selection-info" id="selectionInfo">
+                <strong>선택된 단축어:</strong> <span id="selectedCount">0</span>개
+            </div>
+            <button class="btn" id="generateBtn" disabled>✨ 선택한 단축어 예문 생성하기</button>
             <div id="examplesContainer"></div>
         </div>
 
@@ -365,7 +420,7 @@
 
     <script>
         let shortcuts = [];
-        let selectedShortcut = null;
+        let selectedShortcuts = new Set(); // Changed to Set for multiple selection
         let selectedCount = 3;
         let generatedExamples = '';
 
@@ -379,6 +434,48 @@
         const emailInput = document.getElementById('emailInput');
         const examplesContainer = document.getElementById('examplesContainer');
         const emailStatus = document.getElementById('emailStatus');
+        const testApiKeyBtn = document.getElementById('testApiKeyBtn');
+        const apiStatus = document.getElementById('apiStatus');
+        const selectionInfo = document.getElementById('selectionInfo');
+        const selectedCountSpan = document.getElementById('selectedCount');
+
+        // API Key Test
+        testApiKeyBtn.addEventListener('click', async () => {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                alert('API Key를 입력해주세요.');
+                return;
+            }
+
+            testApiKeyBtn.disabled = true;
+            testApiKeyBtn.textContent = '🔍 테스트 중...';
+            apiStatus.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/test-api-key', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ claudeApiKey: apiKey })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    apiStatus.className = 'api-status success show';
+                    apiStatus.innerHTML = `✅ ${data.message}<br><small>Model: ${data.model}</small>`;
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                apiStatus.className = 'api-status error show';
+                apiStatus.textContent = `❌ ${error.message}`;
+            } finally {
+                testApiKeyBtn.disabled = false;
+                testApiKeyBtn.textContent = '🔍 API Key 테스트';
+            }
+        });
 
         // Count selector
         document.querySelectorAll('.count-btn').forEach(btn => {
@@ -446,7 +543,7 @@
             }
 
             shortcutsList.style.display = 'block';
-            shortcutsList.innerHTML = '<strong>단축어를 선택하세요:</strong><br><br>' + 
+            shortcutsList.innerHTML = '<strong>단축어를 선택하세요 (클릭으로 다중 선택 가능):</strong><br><br>' + 
                 shortcuts.map((s, index) => `
                     <div class="shortcut-item" data-index="${index}">
                         <span class="shortcut-abbr">${s.abbreviation}</span>
@@ -454,27 +551,46 @@
                     </div>
                 `).join('');
 
-            // Add click handlers
+            // Add click handlers for multiple selection
             document.querySelectorAll('.shortcut-item').forEach(item => {
                 item.addEventListener('click', () => {
-                    document.querySelectorAll('.shortcut-item').forEach(i => i.classList.remove('selected'));
-                    item.classList.add('selected');
-                    selectedShortcut = shortcuts[parseInt(item.dataset.index)];
+                    const index = parseInt(item.dataset.index);
+                    
+                    if (selectedShortcuts.has(index)) {
+                        // Deselect
+                        selectedShortcuts.delete(index);
+                        item.classList.remove('selected');
+                    } else {
+                        // Select
+                        selectedShortcuts.add(index);
+                        item.classList.add('selected');
+                    }
+                    
                     updateGenerateButton();
+                    updateSelectionInfo();
                 });
             });
         }
 
+        function updateSelectionInfo() {
+            selectedCountSpan.textContent = selectedShortcuts.size;
+            if (selectedShortcuts.size > 0) {
+                selectionInfo.classList.add('show');
+            } else {
+                selectionInfo.classList.remove('show');
+            }
+        }
+
         function updateGenerateButton() {
             const apiKey = apiKeyInput.value.trim();
-            generateBtn.disabled = !(selectedShortcut && apiKey);
+            generateBtn.disabled = !(selectedShortcuts.size > 0 && apiKey);
         }
 
         apiKeyInput.addEventListener('input', updateGenerateButton);
 
         // Generate examples
         generateBtn.addEventListener('click', async () => {
-            if (!selectedShortcut) {
+            if (selectedShortcuts.size === 0) {
                 alert('단축어를 선택해주세요.');
                 return;
             }
@@ -485,17 +601,22 @@
                 return;
             }
 
-            examplesContainer.innerHTML = '<div class="loading">⏳ 예문 생성 중...</div>';
+            examplesContainer.innerHTML = '<div class="loading">⏳ 예문 생성 중... (선택된 ' + selectedShortcuts.size + '개 단축어)</div>';
             generateBtn.disabled = true;
 
             try {
+                // Get selected expressions
+                const selectedExpressions = Array.from(selectedShortcuts).map(index => 
+                    shortcuts[index].fullExpression
+                );
+
                 const response = await fetch('/api/generate', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        fullExpression: selectedShortcut.fullExpression,
+                        fullExpressions: selectedExpressions,
                         count: selectedCount,
                         claudeApiKey: apiKey
                     })
@@ -504,10 +625,25 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    generatedExamples = data.examples;
+                    // Build combined examples output
+                    let combinedOutput = '';
+                    
+                    data.results.forEach((result, index) => {
+                        if (result.success) {
+                            combinedOutput += `\n\n${'='.repeat(60)}\n`;
+                            combinedOutput += `단축어 ${index + 1}: ${result.fullExpression}\n`;
+                            combinedOutput += `${'='.repeat(60)}\n\n`;
+                            combinedOutput += result.examples;
+                        } else {
+                            combinedOutput += `\n\n❌ ${result.fullExpression}: ${result.error}\n`;
+                        }
+                    });
+
+                    generatedExamples = combinedOutput;
+                    
                     examplesContainer.innerHTML = `
-                        <div class="success">✅ 예문 생성 완료!</div>
-                        <div class="examples-container">${generatedExamples}</div>
+                        <div class="success">✅ ${data.totalProcessed}개 단축어 예문 생성 완료!</div>
+                        <div class="examples-container">${combinedOutput}</div>
                     `;
                     sendEmailBtn.disabled = false;
                 } else {
@@ -537,6 +673,16 @@
             sendEmailBtn.disabled = true;
 
             try {
+                // Get selected shortcuts info
+                const selectedInfo = Array.from(selectedShortcuts).map(index => ({
+                    abbr: shortcuts[index].abbreviation,
+                    expr: shortcuts[index].fullExpression
+                }));
+
+                const subjectLine = selectedInfo.length === 1 
+                    ? `English Examples for "${selectedInfo[0].expr}"`
+                    : `English Examples for ${selectedInfo.length} Shortcuts`;
+
                 const response = await fetch('/api/send-email', {
                     method: 'POST',
                     headers: {
@@ -544,8 +690,8 @@
                     },
                     body: JSON.stringify({
                         email: email,
-                        subject: `English Examples for "${selectedShortcut.fullExpression}"`,
-                        body: `Full Expression: ${selectedShortcut.fullExpression}\nAbbreviation: ${selectedShortcut.abbreviation}\n\n${generatedExamples}`
+                        subject: subjectLine,
+                        body: generatedExamples
                     })
                 });
 

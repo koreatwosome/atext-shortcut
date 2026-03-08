@@ -387,13 +387,72 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
   }
 });
 
+// Test Claude API key
+app.post('/api/test-api-key', async (req, res) => {
+  try {
+    const { claudeApiKey } = req.body;
+
+    if (!claudeApiKey) {
+      return res.status(400).json({ error: 'Claude API key is required' });
+    }
+
+    // Test the API key with a simple request
+    const response = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 50,
+        messages: [
+          {
+            role: 'user',
+            content: 'Say "API key is valid" if you can read this.'
+          }
+        ]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeApiKey,
+          'anthropic-version': '2023-06-01'
+        }
+      }
+    );
+
+    if (response.data && response.data.content && response.data.content[0]) {
+      res.json({ 
+        success: true, 
+        message: 'API key is valid and working!',
+        model: response.data.model,
+        testResponse: response.data.content[0].text
+      });
+    } else {
+      throw new Error('Invalid response from Claude API');
+    }
+  } catch (error) {
+    console.error('API key test error:', error.response?.data || error.message);
+    
+    let errorMessage = 'API key test failed';
+    if (error.response?.status === 401) {
+      errorMessage = 'Invalid API key - Authentication failed';
+    } else if (error.response?.status === 429) {
+      errorMessage = 'Rate limit exceeded - Please try again later';
+    } else if (error.response?.data?.error?.message) {
+      errorMessage = error.response.data.error.message;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
+    res.status(error.response?.status || 500).json({ 
+      success: false,
+      error: errorMessage,
+      details: error.response?.data
+    });
+  }
+});
+
 app.post('/api/generate', async (req, res) => {
   try {
-    const { fullExpression, count, claudeApiKey } = req.body;
-
-    if (!fullExpression) {
-      return res.status(400).json({ error: 'Full expression is required' });
-    }
+    const { fullExpression, fullExpressions, count, claudeApiKey } = req.body;
 
     if (!claudeApiKey) {
       return res.status(400).json({ error: 'Claude API key is required' });
@@ -403,13 +462,38 @@ app.post('/api/generate', async (req, res) => {
       return res.status(400).json({ error: 'Count must be 3, 5, or 7' });
     }
 
-    const examples = await generateExamples(fullExpression, count, claudeApiKey);
+    // Support both single and multiple shortcuts
+    const expressions = fullExpressions || (fullExpression ? [fullExpression] : []);
+    
+    if (expressions.length === 0) {
+      return res.status(400).json({ error: 'At least one expression is required' });
+    }
+
+    // Generate examples for all expressions
+    const results = [];
+    
+    for (const expr of expressions) {
+      try {
+        const examples = await generateExamples(expr, count, claudeApiKey);
+        results.push({
+          fullExpression: expr,
+          examples: examples,
+          success: true
+        });
+      } catch (error) {
+        results.push({
+          fullExpression: expr,
+          error: error.message,
+          success: false
+        });
+      }
+    }
 
     res.json({ 
       success: true, 
-      examples: examples,
-      fullExpression: fullExpression,
-      count: count
+      results: results,
+      count: count,
+      totalProcessed: expressions.length
     });
   } catch (error) {
     console.error('Generate error:', error);
