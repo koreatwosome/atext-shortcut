@@ -41,7 +41,13 @@ npm start
 
 ## 지원 파일 형식
 
-### 1. aText/plist (XML)
+### 1. aText Binary (Modern Format)
+최신 aText 앱에서 내보낸 바이너리 형식의 파일을 지원합니다.
+- 제어 문자와 null 바이트가 포함된 바이너리 구조
+- JSON 메타데이터가 임베드된 형식
+- 예시: `guti.atext`, `certly.atext`
+
+### 2. aText/plist (XML - Legacy Format)
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,7 +66,7 @@ npm start
 </plist>
 ```
 
-### 2. JSON
+### 3. JSON
 ```json
 [
   {
@@ -202,15 +208,18 @@ atext-shortcut-generator/
 - 자동으로 중복 단축어 제거
 
 ### 유연한 파일 형식 지원
-- **XML 형식**: aText/plist 표준 형식
+- **Binary aText**: 최신 aText 앱의 바이너리 형식 (제어 문자 포함)
+- **XML 형식**: aText/plist 표준 형식 (레거시)
 - **JSON 형식**: 다양한 JSON 구조 지원
 - **CSV 형식**: 콤마로 구분된 텍스트
 - **텍스트 형식**: 탭으로 구분된 텍스트
 
 ### 지능형 파싱
+- 바이너리 레벨 파싱으로 임베드된 데이터 추출
 - 파일 확장자와 내용을 기반으로 자동 형식 감지
 - 여러 형식을 순차적으로 시도하는 폴백 메커니즘
 - 각 파일의 처리 결과를 개별적으로 표시
+- null 바이트 및 제어 문자 처리
 
 ## 주의사항
 
