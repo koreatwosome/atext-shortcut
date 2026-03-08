@@ -34,10 +34,105 @@ const upload = multer({ storage: storage });
 // Parse atext file - supports multiple formats
 function parseAtextFile(filePath) {
   try {
-    const fileContent = fs.readFileSync(filePath, 'utf8');
-    const ext = path.extname(filePath).toLowerCase();
+    // First try to read as UTF-8 text
+    let fileContent;
+    try {
+      fileContent = fs.readFileSync(filePath, 'utf8');
+    } catch (readError) {
+      // If UTF-8 fails, read as binary
+      const buffer = fs.readFileSync(filePath);
+      fileContent = buffer.toString('utf8');
+    }
     
+    const ext = path.extname(filePath).toLowerCase();
     let shortcuts = [];
+    
+    // Try binary aText format (new format with embedded JSON)
+    if (ext === '.atext') {
+      try {
+        // Read as buffer for binary parsing
+        const buffer = fs.readFileSync(filePath);
+        
+        // Find all abbreviations with pattern "1":["..."]
+        let abbrPos = 0;
+        const abbreviations = [];
+        
+        while (true) {
+          const pattern = Buffer.from('"1":["');
+          abbrPos = buffer.indexOf(pattern, abbrPos);
+          if (abbrPos === -1) break;
+          
+          // Find closing "]
+          const closePos = buffer.indexOf(Buffer.from('"]'), abbrPos);
+          if (closePos === -1) break;
+          
+          const abbr = buffer.slice(abbrPos + pattern.length, closePos).toString('utf8');
+          abbreviations.push({ abbr, pos: abbrPos });
+          abbrPos = closePos + 1;
+        }
+        
+        // Find all phrases with pattern "4":
+        let phrasePos = 0;
+        const phrases = [];
+        
+        while (true) {
+          const pattern = Buffer.from('"4":');
+          phrasePos = buffer.indexOf(pattern, phrasePos);
+          if (phrasePos === -1) break;
+          
+          // Skip "4": and look for the actual text
+          let textStart = phrasePos + pattern.length;
+          
+          // Skip quote and control characters
+          while (textStart < buffer.length && (buffer[textStart] < 32 || buffer[textStart] === 34)) {
+            textStart++;
+          }
+          
+          // Collect printable characters until we hit control char or closing bracket
+          let textEnd = textStart;
+          const phraseBytes = [];
+          
+          while (textEnd < buffer.length) {
+            const byte = buffer[textEnd];
+            if (byte >= 32 && byte < 127 && byte !== 125) { // printable and not }
+              phraseBytes.push(byte);
+              textEnd++;
+            } else if (phraseBytes.length > 0) {
+              // We found some text, stop here
+              break;
+            } else {
+              // Still looking for text
+              textEnd++;
+              if (textEnd - textStart > 20) break; // Give up after 20 bytes
+            }
+          }
+          
+          if (phraseBytes.length > 0) {
+            const phrase = Buffer.from(phraseBytes).toString('utf8').trim();
+            phrases.push({ phrase, pos: phrasePos });
+          }
+          
+          phrasePos = textEnd;
+        }
+        
+        // Match abbreviations with their phrases based on order
+        for (let i = 0; i < Math.min(abbreviations.length, phrases.length); i++) {
+          if (abbreviations[i].abbr && phrases[i].phrase) {
+            shortcuts.push({
+              abbreviation: abbreviations[i].abbr,
+              fullExpression: phrases[i].phrase
+            });
+          }
+        }
+        
+        if (shortcuts.length > 0) {
+          console.log(`Binary aText format: found ${shortcuts.length} shortcuts`);
+          return shortcuts;
+        }
+      } catch (binaryError) {
+        console.log('Not a binary aText format, trying other formats...', binaryError.message);
+      }
+    }
     
     // Try plist format (XML)
     if (ext === '.atext' || ext === '.plist' || fileContent.includes('<?xml')) {
@@ -132,7 +227,7 @@ function parseAtextFile(filePath) {
       return shortcuts;
     }
     
-    throw new Error('Unable to parse file. Supported formats: aText/plist (XML), JSON, CSV, or tab-separated text');
+    throw new Error('Unable to parse file. Supported formats: aText binary, plist (XML), JSON, CSV, or tab-separated text');
   } catch (error) {
     console.error('Error parsing file:', error);
     throw error;
