@@ -1,0 +1,21 @@
+{
+  "name": "atext-shortcut-generator",
+  "version": "1.0.0",
+  "description": "atext shortcut file parser and English example sentence generator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["atext", "shortcut", "english", "example", "generator"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "nodemailer": "^6.9.7",
+    "plist": "^3.1.0"
+  }
+}
