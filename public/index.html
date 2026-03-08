@@ -257,6 +257,42 @@
         .count-btn:hover {
             border-color: #667eea;
         }
+
+        .file-details {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .file-details.show {
+            display: block;
+        }
+
+        .file-item {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item.success {
+            border-left: 4px solid #28a745;
+        }
+
+        .file-item.error {
+            border-left: 4px solid #dc3545;
+        }
+
+        .info-text {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -280,11 +316,12 @@
         <div class="section">
             <div class="section-title">
                 <span class="section-number">2</span>
-                aText 파일 업로드
+                aText 파일 업로드 (여러 파일 선택 가능)
             </div>
-            <label for="fileInput" class="file-upload-btn">📁 파일 선택</label>
-            <input type="file" id="fileInput" accept=".atext,.plist" />
+            <label for="fileInput" class="file-upload-btn">📁 파일 선택 (다중 선택 가능)</label>
+            <input type="file" id="fileInput" accept=".atext,.plist,.json,.csv,.txt" multiple />
             <div id="fileName" class="file-name"></div>
+            <div id="fileDetails" class="file-details"></div>
             <div id="shortcutsList" class="shortcuts-list" style="display: none;"></div>
         </div>
 
@@ -334,6 +371,7 @@
 
         const fileInput = document.getElementById('fileInput');
         const fileName = document.getElementById('fileName');
+        const fileDetails = document.getElementById('fileDetails');
         const shortcutsList = document.getElementById('shortcutsList');
         const generateBtn = document.getElementById('generateBtn');
         const sendEmailBtn = document.getElementById('sendEmailBtn');
@@ -351,16 +389,19 @@
             });
         });
 
-        // File upload
+        // File upload - Multiple files support
         fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
 
-            fileName.textContent = `업로드 중: ${file.name}`;
+            fileName.textContent = `업로드 중... ${files.length}개 파일 처리 중`;
             fileName.style.color = '#667eea';
+            fileDetails.style.display = 'none';
 
             const formData = new FormData();
-            formData.append('file', file);
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
 
             try {
                 const response = await fetch('/api/upload', {
@@ -372,8 +413,21 @@
 
                 if (data.success) {
                     shortcuts = data.shortcuts;
-                    fileName.textContent = `✅ ${file.name} (${data.count}개의 단축어 발견)`;
+                    fileName.textContent = `✅ ${files.length}개 파일 업로드 완료 (총 ${data.count}개의 단축어 발견)`;
                     fileName.style.color = '#28a745';
+                    
+                    // Show file processing details
+                    if (data.filesProcessed && data.filesProcessed.length > 0) {
+                        fileDetails.innerHTML = '<strong>파일 처리 결과:</strong><br>' +
+                            data.filesProcessed.map(file => `
+                                <div class="file-item ${file.success ? 'success' : 'error'}">
+                                    <span>${file.filename}</span>
+                                    <span>${file.success ? `✅ ${file.count}개` : `❌ ${file.error}`}</span>
+                                </div>
+                            `).join('');
+                        fileDetails.classList.add('show');
+                    }
+                    
                     displayShortcuts();
                 } else {
                     throw new Error(data.error);
@@ -381,6 +435,7 @@
             } catch (error) {
                 fileName.textContent = `❌ 업로드 실패: ${error.message}`;
                 fileName.style.color = '#dc3545';
+                fileDetails.style.display = 'none';
             }
         });
 

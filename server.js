@@ -31,28 +31,111 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// Parse atext file
+// Parse atext file - supports multiple formats
 function parseAtextFile(filePath) {
   try {
     const fileContent = fs.readFileSync(filePath, 'utf8');
-    const data = plist.parse(fileContent);
+    const ext = path.extname(filePath).toLowerCase();
     
-    const shortcuts = [];
-    if (data && data.shortcuts && Array.isArray(data.shortcuts)) {
-      data.shortcuts.forEach(shortcut => {
-        if (shortcut.abbreviation && shortcut.phrase) {
-          shortcuts.push({
-            abbreviation: shortcut.abbreviation,
-            fullExpression: shortcut.phrase
+    let shortcuts = [];
+    
+    // Try plist format (XML)
+    if (ext === '.atext' || ext === '.plist' || fileContent.includes('<?xml')) {
+      try {
+        const data = plist.parse(fileContent);
+        
+        if (data && data.shortcuts && Array.isArray(data.shortcuts)) {
+          data.shortcuts.forEach(shortcut => {
+            if (shortcut.abbreviation && shortcut.phrase) {
+              shortcuts.push({
+                abbreviation: shortcut.abbreviation,
+                fullExpression: shortcut.phrase
+              });
+            }
           });
         }
-      });
+        
+        if (shortcuts.length > 0) {
+          return shortcuts;
+        }
+      } catch (plistError) {
+        console.log('Not a valid plist format, trying other formats...');
+      }
     }
     
-    return shortcuts;
+    // Try JSON format
+    try {
+      const data = JSON.parse(fileContent);
+      
+      // Support various JSON structures
+      if (Array.isArray(data)) {
+        // Direct array of shortcuts
+        data.forEach(item => {
+          if (item.abbreviation && (item.phrase || item.fullExpression)) {
+            shortcuts.push({
+              abbreviation: item.abbreviation,
+              fullExpression: item.phrase || item.fullExpression
+            });
+          } else if (item.abbr && (item.text || item.expansion)) {
+            shortcuts.push({
+              abbreviation: item.abbr,
+              fullExpression: item.text || item.expansion
+            });
+          }
+        });
+      } else if (data.shortcuts && Array.isArray(data.shortcuts)) {
+        // JSON with shortcuts property
+        data.shortcuts.forEach(item => {
+          if (item.abbreviation && (item.phrase || item.fullExpression)) {
+            shortcuts.push({
+              abbreviation: item.abbreviation,
+              fullExpression: item.phrase || item.fullExpression
+            });
+          }
+        });
+      }
+      
+      if (shortcuts.length > 0) {
+        return shortcuts;
+      }
+    } catch (jsonError) {
+      console.log('Not a valid JSON format, trying CSV...');
+    }
+    
+    // Try CSV format (abbreviation,fullExpression)
+    const lines = fileContent.split('\n');
+    for (let line of lines) {
+      line = line.trim();
+      if (!line || line.startsWith('#')) continue;
+      
+      // Try comma separator
+      let parts = line.split(',');
+      if (parts.length >= 2) {
+        shortcuts.push({
+          abbreviation: parts[0].trim(),
+          fullExpression: parts.slice(1).join(',').trim()
+        });
+        continue;
+      }
+      
+      // Try tab separator
+      parts = line.split('\t');
+      if (parts.length >= 2) {
+        shortcuts.push({
+          abbreviation: parts[0].trim(),
+          fullExpression: parts.slice(1).join('\t').trim()
+        });
+      }
+    }
+    
+    if (shortcuts.length > 0) {
+      return shortcuts;
+    }
+    
+    throw new Error('Unable to parse file. Supported formats: aText/plist (XML), JSON, CSV, or tab-separated text');
   } catch (error) {
-    console.error('Error parsing atext file:', error);
-    throw new Error('Failed to parse atext file');
+    console.error('Error parsing file:', error);
+    throw error;
   }
 }
 
@@ -145,22 +228,63 @@ async function sendEmail(to, subject, body) {
   */
 }
 
-// Routes
-app.post('/api/upload', upload.single('file'), async (req, res) => {
+// Routes - Support multiple file uploads
+app.post('/api/upload', upload.array('files', 10), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
     }
 
-    const shortcuts = parseAtextFile(req.file.path);
+    let allShortcuts = [];
+    const fileResults = [];
     
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+    for (const file of req.files) {
+      try {
+        const shortcuts = parseAtextFile(file.path);
+        allShortcuts = allShortcuts.concat(shortcuts);
+        
+        fileResults.push({
+          filename: file.originalname,
+          success: true,
+          count: shortcuts.length
+        });
+        
+        console.log(`Successfully parsed ${file.originalname}: ${shortcuts.length} shortcuts`);
+      } catch (error) {
+        fileResults.push({
+          filename: file.originalname,
+          success: false,
+          error: error.message
+        });
+        console.error(`Failed to parse ${file.originalname}:`, error.message);
+      }
+      
+      // Clean up uploaded file
+      try {
+        fs.unlinkSync(file.path);
+      } catch (unlinkError) {
+        console.error('Error deleting file:', unlinkError);
+      }
+    }
+    
+    // Remove duplicates based on abbreviation
+    const uniqueShortcuts = [];
+    const seen = new Set();
+    
+    for (const shortcut of allShortcuts) {
+      const key = shortcut.abbreviation.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueShortcuts.push(shortcut);
+      }
+    }
     
     res.json({ 
       success: true, 
-      shortcuts: shortcuts,
-      count: shortcuts.length 
+      shortcuts: uniqueShortcuts,
+      count: uniqueShortcuts.length,
+      totalParsed: allShortcuts.length,
+      filesProcessed: fileResults
     });
   } catch (error) {
     console.error('Upload error:', error);
